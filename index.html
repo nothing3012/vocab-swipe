@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#101218">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="随手背词">
+  <meta name="description" content="一屏一词，滑动查看 Vocabulary in Use 例句与中文翻译。">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="./icon.svg">
+  <link rel="apple-touch-icon" href="./icon.svg">
+  <title>随手背词</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101218;
+      --panel: #171a22;
+      --line: #2b303c;
+      --text: #f2f4f8;
+      --muted: #a2a9b7;
+      --faint: #6f7787;
+      --accent: #7aa8ff;
+      --accent-soft: #1d2b45;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior: none;
+      touch-action: none;
+    }
+    .app {
+      min-height: 100dvh;
+      padding: max(18px, env(safe-area-inset-top)) 16px max(14px, env(safe-area-inset-bottom));
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 12px;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 28px;
+      padding: 0 2px;
+      color: var(--faint);
+      font-size: 12px;
+      letter-spacing: .02em;
+    }
+    .scene {
+      max-width: 48vw;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #b8c9ea;
+      background: var(--accent-soft);
+      border: 1px solid #2d4267;
+      border-radius: 999px;
+      padding: 5px 9px;
+    }
+    .counter { font-variant-numeric: tabular-nums; }
+    .card {
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      background: var(--panel);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, .24);
+      padding: clamp(24px, 6vw, 38px) clamp(22px, 7vw, 44px);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      overflow: auto;
+      transform: translateY(0);
+      opacity: 1;
+      transition: transform .18s ease, opacity .18s ease;
+    }
+    .card.leaving-up { transform: translateY(-18px); opacity: 0; }
+    .card.leaving-down { transform: translateY(18px); opacity: 0; }
+    .sentence {
+      margin: 0;
+      font-family: ui-serif, "New York", Georgia, "Times New Roman", serif;
+      font-size: clamp(26px, 7.4vw, 44px);
+      line-height: 1.22;
+      letter-spacing: -.018em;
+      text-wrap: balance;
+    }
+    .sentence .target { color: var(--accent); font-weight: 750; }
+    .sentence .ipa {
+      color: var(--muted);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      font-size: .42em;
+      font-weight: 500;
+      letter-spacing: 0;
+      white-space: nowrap;
+      margin-left: .4em;
+    }
+    .translation {
+      margin: clamp(18px, 4vh, 34px) 0 0;
+      color: #d5d9e1;
+      font-size: clamp(17px, 4.7vw, 23px);
+      line-height: 1.55;
+    }
+    .divider {
+      width: 32px;
+      height: 2px;
+      margin: clamp(20px, 4vh, 34px) 0 16px;
+      border-radius: 2px;
+      background: var(--accent);
+      opacity: .75;
+    }
+    .wordline {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 15px;
+      line-height: 1.45;
+    }
+    .word { color: var(--text); font-weight: 700; }
+    .pos { color: var(--faint); font-size: 13px; }
+    .meaning {
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: 52px 1fr 52px;
+      align-items: center;
+      min-height: 50px;
+    }
+    button {
+      width: 48px;
+      height: 48px;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      color: var(--muted);
+      background: var(--panel);
+      font-size: 24px;
+      font-weight: 300;
+    }
+    button:active { transform: scale(.94); background: #20242e; }
+    .gesture-hint {
+      justify-self: center;
+      color: var(--faint);
+      font-size: 12px;
+      user-select: none;
+    }
+    .loading, .error {
+      margin: auto;
+      color: var(--muted);
+      font-size: 16px;
+      text-align: center;
+      line-height: 1.6;
+    }
+    @media (min-width: 700px) {
+      .app { width: min(620px, 100%); margin: 0 auto; padding-left: 24px; padding-right: 24px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .card { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app" aria-live="polite">
+    <header class="topbar">
+      <span class="counter" id="counter">读取词表…</span>
+      <span class="scene" id="scene">Vocabulary in Use</span>
+    </header>
+
+    <article class="card" id="card">
+      <div class="loading" id="loading">正在准备词表…</div>
+      <div id="content" hidden>
+        <p class="sentence" id="sentence"></p>
+        <p class="translation" id="translation"></p>
+        <div class="divider"></div>
+        <div class="wordline">
+          <span class="word" id="word"></span>
+          <span class="pos" id="pos"></span>
+        </div>
+        <div class="meaning" id="meaning"></div>
+      </div>
+    </article>
+
+    <nav class="controls" aria-label="切换单词">
+      <button id="previous" aria-label="上一个词">‹</button>
+      <span class="gesture-hint">上滑看下一个</span>
+      <button id="next" aria-label="下一个词">›</button>
+    </nav>
+  </main>
+
+  <script>
+    const STORAGE_KEY = "vocab-swipe-position-v2";
+    const elements = {
+      card: document.querySelector("#card"),
+      loading: document.querySelector("#loading"),
+      content: document.querySelector("#content"),
+      counter: document.querySelector("#counter"),
+      scene: document.querySelector("#scene"),
+      sentence: document.querySelector("#sentence"),
+      translation: document.querySelector("#translation"),
+      word: document.querySelector("#word"),
+      pos: document.querySelector("#pos"),
+      meaning: document.querySelector("#meaning"),
+      previous: document.querySelector("#previous"),
+      next: document.querySelector("#next")
+    };
+
+    let words = [];
+    let index = 0;
+    let touchStartY = null;
+    let touchStartX = null;
+    let switching = false;
+
+    function appendSentence(entry) {
+      const sentence = entry.example || "";
+      const highlight = entry.highlight || entry.word || "";
+      const lower = sentence.toLocaleLowerCase("en");
+      const start = lower.indexOf(highlight.toLocaleLowerCase("en"));
+      elements.sentence.replaceChildren();
+
+      if (start < 0) {
+        const target = document.createElement("span");
+        target.className = "target";
+        target.textContent = entry.word;
+        elements.sentence.append(target, document.createTextNode(" "));
+        appendIPA(entry.pronunciation);
+        elements.sentence.append(document.createTextNode(" — " + sentence));
+        return;
+      }
+
+      elements.sentence.append(document.createTextNode(sentence.slice(0, start)));
+      const target = document.createElement("span");
+      target.className = "target";
+      target.textContent = sentence.slice(start, start + highlight.length);
+      elements.sentence.append(target);
+      appendIPA(entry.pronunciation);
+      elements.sentence.append(document.createTextNode(sentence.slice(start + highlight.length)));
+    }
+
+    function appendIPA(value) {
+      if (!value) return;
+      const ipa = document.createElement("span");
+      ipa.className = "ipa";
+      ipa.textContent = value;
+      elements.sentence.append(ipa);
+    }
+
+    function render() {
+      const entry = words[index];
+      appendSentence(entry);
+      elements.translation.textContent = entry.exampleTranslation;
+      elements.word.textContent = entry.word;
+      elements.pos.textContent = entry.level ? `· ${entry.level}` : "";
+      elements.meaning.textContent = entry.definition;
+      elements.scene.textContent = entry.scene;
+      elements.counter.textContent = `${index + 1} / ${words.length}`;
+      elements.loading.hidden = true;
+      elements.content.hidden = false;
+      localStorage.setItem(STORAGE_KEY, String(index));
+    }
+
+    function move(delta) {
+      if (!words.length || switching) return;
+      switching = true;
+      elements.card.classList.add(delta > 0 ? "leaving-up" : "leaving-down");
+      window.setTimeout(() => {
+        index = (index + delta + words.length) % words.length;
+        render();
+        elements.card.classList.remove("leaving-up", "leaving-down");
+        switching = false;
+      }, 140);
+    }
+
+    elements.next.addEventListener("click", () => move(1));
+    elements.previous.addEventListener("click", () => move(-1));
+    document.addEventListener("keydown", event => {
+      if (["ArrowDown", "ArrowRight", " "].includes(event.key)) move(1);
+      if (["ArrowUp", "ArrowLeft"].includes(event.key)) move(-1);
+    });
+    document.addEventListener("touchstart", event => {
+      const touch = event.changedTouches[0];
+      touchStartY = touch.clientY;
+      touchStartX = touch.clientX;
+    }, { passive: true });
+    document.addEventListener("touchend", event => {
+      if (touchStartY === null || touchStartX === null) return;
+      const touch = event.changedTouches[0];
+      const dy = touch.clientY - touchStartY;
+      const dx = touch.clientX - touchStartX;
+      touchStartY = null;
+      touchStartX = null;
+      if (Math.abs(dy) < 44 || Math.abs(dy) < Math.abs(dx) * 1.2) return;
+      move(dy < 0 ? 1 : -1);
+    }, { passive: true });
+
+    fetch("./vocab.json")
+      .then(response => {
+        if (!response.ok) throw new Error("词表读取失败");
+        return response.json();
+      })
+      .then(data => {
+        words = data;
+        const saved = Number.parseInt(localStorage.getItem(STORAGE_KEY) || "0", 10);
+        index = Number.isFinite(saved) ? Math.max(0, saved) % words.length : 0;
+        render();
+      })
+      .catch(error => {
+        elements.loading.className = "error";
+        elements.loading.textContent = `${error.message}，请刷新重试。`;
+        elements.counter.textContent = "无法读取";
+      });
+
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => navigator.serviceWorker.register("./service-worker.js"));
+    }
+  </script>
+</body>
+</html>

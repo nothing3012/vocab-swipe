@@ -1,0 +1,17 @@
+{
+  "name": "随手背词",
+  "short_name": "背词",
+  "description": "一屏一词，滑动查看英文例句和中文翻译。",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#101218",
+  "theme_color": "#101218",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
