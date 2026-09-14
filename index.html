@@ -239,6 +239,8 @@
   <script>
     const STORAGE_KEY = "vocab-swipe-position-v3";
     const LEGACY_STORAGE_KEY = "vocab-swipe-position-v2";
+    const SYNC_CONFIG_KEY = "vocab-swipe-sync-v1";
+    const SYNC_ENDPOINT = "https://vocab-swipe-12929.northn3011.chatgpt.site/api/progress";
     const BATCH_SIZE = 100;
     const elements = {
       card: document.querySelector("#card"),
@@ -264,6 +266,9 @@
     let touchStartY = null;
     let touchStartX = null;
     let switching = false;
+    let syncConfig = null;
+    let syncUpdatedAt = 0;
+    let syncWorkItem = null;
 
     function appendSentence(entry) {
       const sentence = entry.example || "";
@@ -301,12 +306,13 @@
 
     function sceneName(value) { return value === "__all__" ? "全部场景" : value; }
 
-    function saveProgress() {
+    function saveProgress(sync = true) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         globalIndex: activeIndexes[index] ?? 0,
         scene: elements.scenePicker.value || "__all__",
         batch: Number(elements.batchPicker.value || 0)
       }));
+      if (sync) scheduleSyncPush();
     }
 
     function populateScenes(savedScene) {
@@ -342,7 +348,7 @@
       index = found >= 0 ? found : 0;
     }
 
-    function render() {
+    function render(sync = true) {
       const entry = words[activeIndexes[index]];
       if (!entry) return;
       appendSentence(entry);
@@ -357,7 +363,77 @@
       elements.content.hidden = false;
       elements.previous.disabled = index === 0;
       elements.next.disabled = index === activeIndexes.length - 1;
-      saveProgress();
+      saveProgress(sync);
+    }
+
+    function validPair(value) {
+      const parts = value.split(".");
+      return parts.length === 2 && /^[A-Za-z0-9_-]{16,80}$/.test(parts[0]) && /^[A-Za-z0-9_-]{24,160}$/.test(parts[1])
+        ? { id: parts[0], key: parts[1] } : null;
+    }
+
+    function loadSyncConfig() {
+      const pairing = new URLSearchParams(location.hash.slice(1)).get("sync");
+      const fromLink = pairing ? validPair(pairing) : null;
+      if (fromLink) {
+        localStorage.setItem(SYNC_CONFIG_KEY, JSON.stringify(fromLink));
+        history.replaceState(null, "", location.pathname + location.search);
+        return fromLink;
+      }
+      try { return validPair(Object.values(JSON.parse(localStorage.getItem(SYNC_CONFIG_KEY) || "{}")).join(".")); } catch (_) { return null; }
+    }
+
+    function syncURL() { return `${SYNC_ENDPOINT}/${syncConfig.id}`; }
+
+    async function syncPush() {
+      if (!syncConfig || !activeIndexes.length) return;
+      try {
+        const response = await fetch(syncURL(), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "X-Vocab-Sync-Key": syncConfig.key },
+          body: JSON.stringify({
+            globalIndex: activeIndexes[index],
+            scene: elements.scenePicker.value,
+            batch: Number(elements.batchPicker.value || 0)
+          })
+        });
+        if (response.ok) syncUpdatedAt = (await response.json()).updatedAt || syncUpdatedAt;
+      } catch (_) { /* 下一次操作或轮询会重试 */ }
+    }
+
+    function scheduleSyncPush() {
+      if (!syncConfig) return;
+      clearTimeout(syncWorkItem);
+      syncWorkItem = setTimeout(syncPush, 450);
+    }
+
+    function applyRemoteProgress(progress) {
+      const scene = progress.scene;
+      const knownScenes = [...new Set(words.map(entry => entry.scene || "通用语境"))];
+      elements.scenePicker.value = scene === "__all__" || knownScenes.includes(scene) ? scene : "__all__";
+      updateActiveIndexes(progress.globalIndex, progress.batch);
+      render(false);
+    }
+
+    async function syncPull() {
+      if (!syncConfig || !words.length) return;
+      try {
+        const response = await fetch(syncURL(), { headers: { "X-Vocab-Sync-Key": syncConfig.key } });
+        if (response.status === 404) { await syncPush(); return; }
+        if (!response.ok) return;
+        const remote = await response.json();
+        if (Number.isInteger(remote.globalIndex) && remote.updatedAt > syncUpdatedAt) {
+          syncUpdatedAt = remote.updatedAt;
+          applyRemoteProgress(remote);
+        }
+      } catch (_) { /* 离线时继续用本地进度 */ }
+    }
+
+    function beginSync() {
+      syncConfig = loadSyncConfig();
+      if (!syncConfig) return;
+      syncPull();
+      setInterval(() => { if (!document.hidden) syncPull(); }, 8000);
     }
 
     function move(delta) {
@@ -371,7 +447,8 @@
           return;
         }
         index = nextIndex;
-        render();
+        render(false);
+        beginSync();
         elements.card.classList.remove("leaving-up", "leaving-down");
         switching = false;
       }, 140);
