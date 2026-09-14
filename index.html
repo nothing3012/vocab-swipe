@@ -380,7 +380,10 @@
         history.replaceState(null, "", location.pathname + location.search);
         return fromLink;
       }
-      try { return validPair(Object.values(JSON.parse(localStorage.getItem(SYNC_CONFIG_KEY) || "{}")).join(".")); } catch (_) { return null; }
+      try {
+        const saved = JSON.parse(localStorage.getItem(SYNC_CONFIG_KEY) || "{}");
+        return saved?.id && saved?.key ? validPair(`${saved.id}.${saved.key}`) : null;
+      } catch (_) { return null; }
     }
 
     function syncURL() { return `${SYNC_ENDPOINT}/${syncConfig.id}`; }
@@ -509,6 +512,7 @@
         populateScenes(saved.scene);
         updateActiveIndexes(saved.globalIndex, saved.batch);
         render();
+        beginSync();
       })
       .catch(error => {
         elements.loading.className = "error";
