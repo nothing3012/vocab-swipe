@@ -62,6 +62,40 @@
       border: 1px solid #2d4267;
       border-radius: 999px;
       padding: 5px 9px;
+      font: inherit;
+      width: auto;
+      height: auto;
+      font-size: 12px;
+      line-height: 1.2;
+      cursor: pointer;
+    }
+    .scene::after { content: "⌄"; margin-left: 5px; opacity: .7; }
+    .picker {
+      position: fixed;
+      z-index: 5;
+      top: max(54px, calc(env(safe-area-inset-top) + 44px));
+      right: 16px;
+      left: 16px;
+      display: grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap: 8px;
+      padding: 10px;
+      border: 1px solid #36445e;
+      border-radius: 16px;
+      background: #1a1f2a;
+      box-shadow: 0 16px 42px rgba(0, 0, 0, .38);
+    }
+    .picker[hidden] { display: none; }
+    .picker select {
+      min-width: 0;
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0 9px;
+      color: var(--text);
+      background: #11151d;
+      font: 14px -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+      touch-action: auto;
     }
     .counter { font-variant-numeric: tabular-nums; }
     .card {
@@ -147,6 +181,8 @@
       font-weight: 300;
     }
     button:active { transform: scale(.94); background: #20242e; }
+    button.scene:active { transform: none; background: var(--accent-soft); }
+    button:disabled { opacity: .28; }
     .gesture-hint {
       justify-self: center;
       color: var(--faint);
@@ -172,8 +208,12 @@
   <main class="app" aria-live="polite">
     <header class="topbar">
       <span class="counter" id="counter">读取词表…</span>
-      <span class="scene" id="scene">Vocabulary in Use</span>
+      <button class="scene" id="scene" aria-expanded="false" aria-controls="picker">Vocabulary in Use</button>
     </header>
+    <section class="picker" id="picker" hidden aria-label="选择背词范围">
+      <select id="scenePicker" aria-label="场景"></select>
+      <select id="batchPicker" aria-label="每组 100 词"></select>
+    </section>
 
     <article class="card" id="card">
       <div class="loading" id="loading">正在准备词表…</div>
@@ -197,13 +237,18 @@
   </main>
 
   <script>
-    const STORAGE_KEY = "vocab-swipe-position-v2";
+    const STORAGE_KEY = "vocab-swipe-position-v3";
+    const LEGACY_STORAGE_KEY = "vocab-swipe-position-v2";
+    const BATCH_SIZE = 100;
     const elements = {
       card: document.querySelector("#card"),
       loading: document.querySelector("#loading"),
       content: document.querySelector("#content"),
       counter: document.querySelector("#counter"),
       scene: document.querySelector("#scene"),
+      picker: document.querySelector("#picker"),
+      scenePicker: document.querySelector("#scenePicker"),
+      batchPicker: document.querySelector("#batchPicker"),
       sentence: document.querySelector("#sentence"),
       translation: document.querySelector("#translation"),
       word: document.querySelector("#word"),
@@ -214,6 +259,7 @@
     };
 
     let words = [];
+    let activeIndexes = [];
     let index = 0;
     let touchStartY = null;
     let touchStartX = null;
@@ -253,18 +299,65 @@
       elements.sentence.append(ipa);
     }
 
+    function sceneName(value) { return value === "__all__" ? "全部场景" : value; }
+
+    function saveProgress() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        globalIndex: activeIndexes[index] ?? 0,
+        scene: elements.scenePicker.value || "__all__",
+        batch: Number(elements.batchPicker.value || 0)
+      }));
+    }
+
+    function populateScenes(savedScene) {
+      const scenes = [...new Set(words.map(entry => entry.scene || "通用语境"))];
+      elements.scenePicker.replaceChildren();
+      [["__all__", "全部场景"], ...scenes.map(scene => [scene, scene])].forEach(([value, label]) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        elements.scenePicker.append(option);
+      });
+      elements.scenePicker.value = scenes.includes(savedScene) ? savedScene : "__all__";
+    }
+
+    function updateActiveIndexes(preferredGlobalIndex, preferredBatch) {
+      const scene = elements.scenePicker.value;
+      const matching = words.map((entry, i) => i).filter(i => scene === "__all__" || (words[i].scene || "通用语境") === scene);
+      const batches = Math.max(1, Math.ceil(matching.length / BATCH_SIZE));
+      const suggestedBatch = preferredGlobalIndex === undefined ? Number(preferredBatch || 0) : Math.floor(Math.max(0, matching.indexOf(preferredGlobalIndex)) / BATCH_SIZE);
+      const batch = Math.min(Math.max(0, suggestedBatch), batches - 1);
+      elements.batchPicker.replaceChildren();
+      for (let i = 0; i < batches; i += 1) {
+        const option = document.createElement("option");
+        const start = i * BATCH_SIZE + 1;
+        const end = Math.min((i + 1) * BATCH_SIZE, matching.length);
+        option.value = String(i);
+        option.textContent = `${start}–${end} 词`;
+        elements.batchPicker.append(option);
+      }
+      elements.batchPicker.value = String(batch);
+      activeIndexes = matching.slice(batch * BATCH_SIZE, (batch + 1) * BATCH_SIZE);
+      const found = activeIndexes.indexOf(preferredGlobalIndex);
+      index = found >= 0 ? found : 0;
+    }
+
     function render() {
-      const entry = words[index];
+      const entry = words[activeIndexes[index]];
+      if (!entry) return;
       appendSentence(entry);
       elements.translation.textContent = entry.exampleTranslation;
       elements.word.textContent = entry.word;
       elements.pos.textContent = entry.level ? `· ${entry.level}` : "";
       elements.meaning.textContent = entry.definition;
-      elements.scene.textContent = entry.scene;
-      elements.counter.textContent = `${index + 1} / ${words.length}`;
+      const label = `${sceneName(elements.scenePicker.value)} · ${Number(elements.batchPicker.value) + 1}组`;
+      elements.scene.textContent = label;
+      elements.counter.textContent = `${index + 1} / ${activeIndexes.length}`;
       elements.loading.hidden = true;
       elements.content.hidden = false;
-      localStorage.setItem(STORAGE_KEY, String(index));
+      elements.previous.disabled = index === 0;
+      elements.next.disabled = index === activeIndexes.length - 1;
+      saveProgress();
     }
 
     function move(delta) {
@@ -272,7 +365,12 @@
       switching = true;
       elements.card.classList.add(delta > 0 ? "leaving-up" : "leaving-down");
       window.setTimeout(() => {
-        index = (index + delta + words.length) % words.length;
+        const nextIndex = index + delta;
+        if (nextIndex < 0 || nextIndex >= activeIndexes.length) {
+          switching = false;
+          return;
+        }
+        index = nextIndex;
         render();
         elements.card.classList.remove("leaving-up", "leaving-down");
         switching = false;
@@ -281,6 +379,23 @@
 
     elements.next.addEventListener("click", () => move(1));
     elements.previous.addEventListener("click", () => move(-1));
+    elements.scene.addEventListener("click", () => {
+      const opening = elements.picker.hidden;
+      elements.picker.hidden = !opening;
+      elements.scene.setAttribute("aria-expanded", String(opening));
+    });
+    elements.scenePicker.addEventListener("change", () => {
+      updateActiveIndexes(undefined, 0);
+      elements.picker.hidden = true;
+      elements.scene.setAttribute("aria-expanded", "false");
+      render();
+    });
+    elements.batchPicker.addEventListener("change", () => {
+      updateActiveIndexes(undefined, elements.batchPicker.value);
+      elements.picker.hidden = true;
+      elements.scene.setAttribute("aria-expanded", "false");
+      render();
+    });
     document.addEventListener("keydown", event => {
       if (["ArrowDown", "ArrowRight", " "].includes(event.key)) move(1);
       if (["ArrowUp", "ArrowLeft"].includes(event.key)) move(-1);
@@ -308,8 +423,14 @@
       })
       .then(data => {
         words = data;
-        const saved = Number.parseInt(localStorage.getItem(STORAGE_KEY) || "0", 10);
-        index = Number.isFinite(saved) ? Math.max(0, saved) % words.length : 0;
+        let saved = {};
+        try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch (_) {}
+        if (!Number.isFinite(saved.globalIndex)) {
+          const legacy = Number.parseInt(localStorage.getItem(LEGACY_STORAGE_KEY) || "0", 10);
+          saved.globalIndex = Number.isFinite(legacy) ? Math.max(0, legacy) : 0;
+        }
+        populateScenes(saved.scene);
+        updateActiveIndexes(saved.globalIndex, saved.batch);
         render();
       })
       .catch(error => {

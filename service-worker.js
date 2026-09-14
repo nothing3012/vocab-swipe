@@ -1,4 +1,4 @@
-const CACHE = "vocab-swipe-v1";
+const CACHE = "vocab-swipe-v2";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg", "./vocab.json"];
 
 self.addEventListener("install", event => {
